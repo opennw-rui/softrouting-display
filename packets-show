@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+import time
+from collections import defaultdict
+import sys
+import subprocess
+import re
+
+def get_net_stats():
+    stats = defaultdict(lambda: [0] * 16) # 16 fields per iface from /proc/net/dev
+    try:
+        with open('/proc/net/dev', 'r') as f:
+            lines = f.readlines()[2:] # Skip header lines
+            for line in lines:
+                parts = line.split()
+                iface = parts[0].rstrip(':')
+                values = [int(x) for x in parts[1:]]
+                stats[iface] = values
+    except FileNotFoundError:
+        # Fallback for non-Linux (rare)
+        pass
+    return stats
+
+def get_broadcast_and_multicast_stats(iface):
+    """Get rx/tx_broadcast and rx/tx_multicast cumulative values using ethtool -S, fallback for rx_multicast to /proc/net/dev"""
+    rx_b, tx_b, rx_m, tx_m = 0, 0, 0, 0
+    try:
+        result = subprocess.run(['ethtool', '-S', iface], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=1)
+        if result.returncode == 0:
+            output = result.stdout
+            rx_b_match = re.search(r'rx_broadcast:\s*(\d+)', output)
+            tx_b_match = re.search(r'tx_broadcast:\s*(\d+)', output)
+            rx_m_match = re.search(r'rx_multicast:\s*(\d+)', output)
+            tx_m_match = re.search(r'tx_multicast:\s*(\d+)', output)
+            rx_b = int(rx_b_match.group(1)) if rx_b_match else 0
+            tx_b = int(tx_b_match.group(1)) if tx_b_match else 0
+            rx_m = int(rx_m_match.group(1)) if rx_m_match else None
+            tx_m = int(tx_m_match.group(1)) if tx_m_match else 0
+            if rx_m is not None:
+                return rx_b, tx_b, rx_m, tx_m
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, subprocess.SubprocessError):
+        pass
+    # Fallback only for rx_multicast to /proc/net/dev (index 7), tx_multicast no fallback
+    stats = get_net_stats()
+    if iface in stats:
+        rx_m = stats[iface][7]
+    return rx_b, tx_b, rx_m, tx_m
+
+def get_total_width(W):
+    # Precise width for 8 fields: W + 82
+    return W + 82
+
+def get_separator(width):
+    sep_color = "\033[97m"
+    reset = "\033[0m"
+    return sep_color + '-' * width + reset
+
+def get_header(W):
+    header_color = "\033[96;1m"
+    reset = "\033[0m"
+    labels = ["rxpck/s", "txpck/s", "rxMbps", "txMbps", "rxbcast/s", "txbcast/s", "rxmcast/s", "txmcast/s"]
+    fws = [7, 7, 7, 7, 9, 9, 9, 9]
+    h = header_color
+    h += "|"
+    h += "Interface".ljust(W)
+    h += "| "
+    for i, label in enumerate(labels):
+        h += label.rjust(fws[i])
+        if i < 7:
+            h += "| "
+        else:
+            h += "|"
+    h += reset
+    return h
+
+def get_row(iface, rates, W):
+    rxpck, txpck, rxmbps, txmbps, rxbcast, txbcast, rxmcast, txmcast = rates
+    rx_active = rxpck > 0 or rxmbps > 0 or rxbcast > 0 or rxmcast > 0
+    tx_active = txpck > 0 or txmbps > 0 or txbcast > 0 or txmcast > 0
+    rx_attr = "\033[92;1m" if rx_active else "\033[92m"
+    tx_attr = "\033[93;1m" if tx_active else "\033[93m"
+    white = "\033[97m"
+    reset = "\033[0m"
+    line = white + "|" + reset
+    line += white + iface.ljust(W) + reset
+    line += white + "| " + reset
+    # Fixed formats: packets as .0f (integer), Mbps as .2f
+    formats = [">7.0f", ">7.0f", ">7.2f", ">7.2f", ">9.0f", ">9.0f", ">9.0f", ">9.0f"]
+    rate_attrs = [rx_attr, tx_attr, rx_attr, tx_attr, rx_attr, tx_attr, rx_attr, tx_attr]
+    for i, (attr, rate) in enumerate(zip(rate_attrs, rates)):
+        fmt = formats[i]
+        line += attr + ("{:" + fmt + "}").format(rate) + reset
+        if i < 7:
+            line += white + "| " + reset
+        else:
+            line += white + "|" + reset
+    return line
+
+def main():
+    # Hide cursor
+    print("\033[?25l", end='')
+    sys.stdout.flush()
+    # Initial stats to compute max W
+    initial_stats = get_net_stats()
+    initial_ifaces = sorted(set(initial_stats.keys()) - {'lo'})
+    W = max(12, max((len(iface) for iface in initial_ifaces), default=0))
+    total_width = get_total_width(W)
+    top_sep = get_separator(total_width)
+    header_line = get_header(W)
+    mid_sep = get_separator(total_width)
+    bottom_sep = get_separator(total_width)
+    # Print fixed header part
+    print(top_sep)
+    print(header_line)
+    print(mid_sep)
+    print(bottom_sep)
+    sys.stdout.flush()
+    prev_stats = get_net_stats()
+    # Initialize prev_bcast_mcast with actual cumulative values to avoid initial spike
+    prev_bcast_mcast = {iface: get_broadcast_and_multicast_stats(iface) for iface in initial_ifaces}
+    start_time = time.time()
+    prev_num_lines = 4
+    try:
+        while True:
+            current_stats = get_net_stats()
+            current_ifaces = sorted(set(current_stats.keys()) - {'lo'})
+            # Update W if new longer iface
+            new_W = max(W, max((len(iface) for iface in current_ifaces), default=0))
+            if new_W > W:
+                W = new_W
+                total_width = get_total_width(W)
+                top_sep = get_separator(total_width)
+                header_line = get_header(W)
+                mid_sep = get_separator(total_width)
+                bottom_sep = get_separator(total_width)
+            interval = time.time() - start_time
+            if interval < 1.0:
+                time.sleep(0.1)
+                continue
+            row_lines = []
+            for iface in current_ifaces:
+                prev = prev_stats.get(iface, [0] * 16)
+                curr = current_stats[iface]
+                deltas = [curr[i] - prev[i] for i in range(16)]
+                # Fixed rates_list: round for packet rates, handle d >= 0 and interval > 0
+                rates_list = [round(max(0, d) / interval) if interval > 0 else 0 for d in deltas]
+                # Indices: rx_bytes=0, rx_pck=1, tx_bytes=8, tx_pck=9
+                rxpck = rates_list[1]
+                txpck = rates_list[9]
+                # Mbps: keep float for precision (bytes/s * 8 / 1e6)
+                rx_bytes_rate = max(0, deltas[0]) / interval if interval > 0 else 0
+                tx_bytes_rate = max(0, deltas[8]) / interval if interval > 0 else 0
+                rxmbps = rx_bytes_rate * 8 / 1000000
+                txmbps = tx_bytes_rate * 8 / 1000000
+                # Broadcast and Multicast: delta from ethtool (with fallback for rxmcast)
+                curr_bcast_mcast = get_broadcast_and_multicast_stats(iface)
+                prev_bm = prev_bcast_mcast.get(iface, (0, 0, 0, 0))
+                # Ensure non-negative delta (in case of counter wrap, though rare)
+                delta_rx_b = max(0, curr_bcast_mcast[0] - prev_bm[0])
+                delta_tx_b = max(0, curr_bcast_mcast[1] - prev_bm[1])
+                delta_rx_m = max(0, curr_bcast_mcast[2] - prev_bm[2])
+                delta_tx_m = max(0, curr_bcast_mcast[3] - prev_bm[3])
+                rxbcast = round(delta_rx_b / interval) if interval > 0 else 0
+                txbcast = round(delta_tx_b / interval) if interval > 0 else 0
+                rxmcast = round(delta_rx_m / interval) if interval > 0 else 0
+                txmcast = round(delta_tx_m / interval) if interval > 0 else 0
+                rates = (rxpck, txpck, rxmbps, txmbps, rxbcast, txbcast, rxmcast, txmcast)
+                row_lines.append(get_row(iface, rates, W))
+                prev_bcast_mcast[iface] = curr_bcast_mcast # Update prev
+            full_lines = [top_sep, header_line, mid_sep] + row_lines + [bottom_sep]
+            num_lines = len(full_lines)
+            # Move up previous lines and clear down
+            if prev_num_lines > 0:
+                print("\033[{}A\033[J".format(prev_num_lines), end='')
+            for line in full_lines:
+                print(line)
+            sys.stdout.flush()
+            prev_num_lines = num_lines
+            start_time = time.time()
+            prev_stats = current_stats.copy()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # Show cursor and move to new line
+        print("\033[?25h", end='')
+        print()
+
+if __name__ == "__main__":
+    main()
