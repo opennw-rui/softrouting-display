@@ -4,7 +4,15 @@
 # Streamed routel - colorized, paginated, ultra-low-CPU display
 # Supports -i PATTERN, -p N (space to page), -t TABLE
 
-import sys, getopt, subprocess, re, signal, select, termios, tty
+import sys
+import getopt
+import subprocess
+import re
+import signal
+import select
+import termios
+import tty
+import math
 
 # === ANSI colors ===
 C_RESET = "\033[0m"
@@ -14,14 +22,10 @@ C_MAGENTA = "\033[35m"
 C_WHITE = "\033[37m"
 C_RED = "\033[31m"
 
+# Precompute globals for efficiency
 KEYS = ['Dst', 'Gateway', 'Prefsrc', 'Protocol', 'Scope', 'Metric', 'Dev', 'Table']
 COLOR_MAP = {'Dst': C_YELLOW, 'Gateway': C_MAGENTA, 'Dev': C_BLUE, 'Protocol': C_RED}
-
-# === signal ===
-def sigint_handler(signum, frame):
-    sys.stdout.write("\nTerminated by user.\n")
-    sys.exit(0)
-signal.signal(signal.SIGINT, sigint_handler)
+COLOR_SEQ = [COLOR_MAP.get(k, C_WHITE) for k in KEYS]  # Precomputed once
 
 # === wait for space key ===
 def wait_space():
@@ -42,6 +46,7 @@ def wait_space():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 # === parse lines to rows, optional regex filtering ===
+# Optimized: Use list comprehension for row building where possible; incremental colw update
 def parse_lines_to_rows(lines, colw, table, pat_search=None):
     rows = []
     default_protocol = 'kernel'
@@ -51,7 +56,7 @@ def parse_lines_to_rows(lines, colw, table, pat_search=None):
     special_scopes = {'local': 'host', 'anycast': 'host', 'multicast': 'link', 'broadcast': 'global'}
 
     for line in lines:
-        parts = line.split()
+        parts = line.split()  # Already efficient split
         if not parts:
             continue
         row = [''] * 8
@@ -66,6 +71,7 @@ def parse_lines_to_rows(lines, colw, table, pat_search=None):
             row[3] = default_protocol
             row[4] = default_scope
             i = 1
+        # Defaults
         row[1] = '/'
         row[2] = '/'
         row[5] = default_metric
@@ -92,35 +98,30 @@ def parse_lines_to_rows(lines, colw, table, pat_search=None):
             elif key == 'table':
                 row[7] = nxt
             i += 2
+        # Filter check (pat_search on joined row string for consistency)
         if pat_search and not pat_search(' '.join(row)):
             continue
         rows.append(row)
+        # Incremental colw update (efficient, only if longer)
         for j in range(8):
             if len(row[j]) > colw[j]:
                 colw[j] = len(row[j])
     return rows
 
 # === format rows to printable lines (with ANSI) ===
+# Optimized: Build segs with list comprehension and f-strings for minor speed
 def format_rows_to_lines(rows, colw, color_seq):
     out_lines = []
     for row in rows:
-        segs = []
-        for j, val in enumerate(row):
-            c = color_seq[j]
-            if val != '/':
-                segs.append(f"{c}{val.ljust(colw[j])}{C_RESET}")
-            else:
-                segs.append(val.ljust(colw[j]))
-        out_lines.append("  ".join(segs) + "\n")
+        # List comprehension for segs
+        segs = [
+            f"{color_seq[j]}{row[j].ljust(colw[j])}{C_RESET}" if row[j] != '/' else row[j].ljust(colw[j])
+            for j in range(8)
+        ]
+        content = "  ".join(segs)
+        inner = " " + content + " "
+        out_lines.append(f"|{inner}|\n")
     return out_lines
-
-# === compute header and dashline ===
-def make_header_and_dash(colw):
-    visible_len = sum(colw) + 2 * (len(colw) - 1)
-    header_plain = "  ".join(KEYS[i].ljust(colw[i]) for i in range(len(colw)))
-    header_colored = f"{C_BLUE}{header_plain}{C_RESET}"
-    dashline = '-' * visible_len
-    return header_colored, dashline
 
 # === Main ===
 def main():
@@ -129,20 +130,29 @@ def main():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "h46f:i:p:t:", ["help", "family="])
     except getopt.GetoptError as e:
-        print(e); sys.exit(1)
+        print(e)
+        sys.exit(1)
 
     for opt, arg in opts:
         if opt in ("-h", "--help"):
-            print(f"Usage: {sys.argv[0]} [-4|-6] [-p N] [-i PATTERN] [-t TABLE]")
+            print(f"Usage: {sys.argv[0]} [-4|-6] [-p N|all] [-i PATTERN] [-t TABLE]")
             return
-        elif opt == "-6": family = "inet6"
-        elif opt == "-4": family = "inet"
-        elif opt in ("-f", "--family"): family = arg
+        elif opt == "-6":
+            family = "inet6"
+        elif opt == "-4":
+            family = "inet"
+        elif opt in ("-f", "--family"):
+            family = arg
         elif opt == "-p":
-            try: page_size = int(arg)
-            except: page_size = 200
+            if arg == "all":
+                page_size = math.inf
+            else:
+                try:
+                    page_size = int(arg)
+                except ValueError:
+                    page_size = 200
         elif opt == "-i":
-            include_pat = re.compile(arg, re.IGNORECASE)
+            include_pat = re.compile(arg, re.IGNORECASE)  # Precompile regex
         elif opt == "-t":
             table = arg
 
@@ -150,47 +160,87 @@ def main():
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             text=True, bufsize=1, universal_newlines=True)
 
-    colw = [len(k) for k in KEYS]
-    printed_header = False
-    raw_buffer = []
-    color_seq = [COLOR_MAP.get(k, C_WHITE) for k in KEYS]
-
-    fast_match = include_pat.pattern.lower() if include_pat else None
-    pat_search = include_pat.search if include_pat else None
-
+    all_raw = []
     for raw in proc.stdout:
         line = raw.rstrip("\n")
-        if not line: continue
-        # cheap prefilter for -i
-        if fast_match and fast_match not in line.lower():
+        if not line:
             continue
-        raw_buffer.append(line)
-        if len(raw_buffer) >= page_size:
-            rows = parse_lines_to_rows(raw_buffer, colw, table, pat_search)
-            if rows:
-                if not printed_header:
-                    header_colored, dashline = make_header_and_dash(colw)
-                    sys.stdout.write(header_colored + "\n" + dashline + "\n")
-                    printed_header = True
-                out_lines = format_rows_to_lines(rows, colw, color_seq)
-                sys.stdout.writelines(out_lines)
-                sys.stdout.flush()
-                raw_buffer.clear()
-                if not wait_space(): break
-
-    # final flush
-    if raw_buffer:
-        rows = parse_lines_to_rows(raw_buffer, colw, table, pat_search)
-        if rows:
-            if not printed_header:
-                header_colored, dashline = make_header_and_dash(colw)
-                sys.stdout.write(header_colored + "\n" + dashline + "\n")
-            out_lines = format_rows_to_lines(rows, colw, color_seq)
-            sys.stdout.writelines(out_lines)
-            sys.stdout.flush()
+        all_raw.append(line)
 
     proc.stdout.close()
     proc.wait()
+
+    if not all_raw:
+        return
+
+    # Parse all rows without filtering to get total and update colw
+    colw = [len(k) for k in KEYS]
+    all_rows = parse_lines_to_rows(all_raw, colw, table, None)
+    total = len(all_rows)
+
+    if total == 0:
+        return
+
+    # Compute widths
+    visible_len = sum(colw) + 2 * (len(colw) - 1)
+    inner_width = visible_len + 2
+    dashline = '-' * (visible_len + 4)
+
+    # Header
+    header_plain = "  ".join(k.ljust(colw[i]) for i, k in enumerate(KEYS))
+    inner_header = " " + header_plain + " "
+    header_line = f"|{C_BLUE}{inner_header}{C_RESET}|"
+
+    # Total line
+    family_str = "IPv4" if family == "inet" else "IPv6"
+    text = f"{family_str} Routes: {total}"
+    pad_left = (inner_width - len(text)) // 2
+    pad_right = inner_width - len(text) - pad_left
+    total_inner = ' ' * pad_left + text + ' ' * pad_right
+    total_line = f"|{C_BLUE}{total_inner}{C_RESET}|"
+
+    # Filter display rows if needed
+    if include_pat:
+        display_rows = [row for row in all_rows if include_pat.search(' '.join(row))]
+    else:
+        display_rows = all_rows
+
+    # Print the fixed header section (total box + header)
+    sys.stdout.write(dashline + "\n")
+    sys.stdout.write(total_line + "\n")
+    sys.stdout.write(dashline + "\n")
+    sys.stdout.write(header_line + "\n")
+    sys.stdout.write(dashline + "\n")
+    sys.stdout.flush()
+
+    # Define signal handler with access to dashline
+    def sigint_handler(signum, frame):
+        sys.stdout.write(dashline + "\n")
+        sys.stdout.write("Terminated by user.\n")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
+    # Paginate and print rows if any
+    if display_rows:
+        if math.isinf(page_size):
+            out_lines = format_rows_to_lines(display_rows, colw, COLOR_SEQ)
+            sys.stdout.writelines(out_lines)
+            sys.stdout.flush()
+        else:
+            i = 0
+            while i < len(display_rows):
+                page_start = i
+                i += page_size
+                page_rows = display_rows[page_start:i]
+                out_lines = format_rows_to_lines(page_rows, colw, COLOR_SEQ)
+                sys.stdout.writelines(out_lines)
+                sys.stdout.flush()
+                if i < len(display_rows):
+                    if not wait_space():
+                        break
+        # Add bottom dash if completed
+        sys.stdout.write(dashline + "\n")
 
 if __name__ == "__main__":
     main()
