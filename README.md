@@ -20,39 +20,53 @@ Linux下存在iproute2包可以配置内核的ip，路由，接口等信息，�
 
 ```bash
 root@SoftRouting:~# routel -i 192.168.10.0/24
-Dst              Gateway  Prefsrc         Protocol  Scope  Metric  Dev  Table
------------------------------------------------------------------------------
-192.168.10.0/24  /        192.168.10.254  kernel    link   425     lan  main
+----------------------------------------------------------------------------------------------
+|                                     IPv4 Routes: 5534                                      |
+----------------------------------------------------------------------------------------------
+| Dst                 Gateway       Prefsrc         Protocol  Scope   Metric  Dev      Table |
+----------------------------------------------------------------------------------------------
+| 192.168.10.0/24     /             192.168.10.254  kernel    link    425     lan      main  |
+----------------------------------------------------------------------------------------------
 ```
 
-2、routel -p 2000：指定打印单页的路由数（默认300条）  
+2、routel -p 500：指定打印单页的路由数（默认300条），使用-p all显示当前协议下的所有路由  
 
 ```bash
-root@SoftRouting:~# routel -p 2000
+root@SoftRouting:~# routel -p 500
+root@SoftRouting:~# routel -p all
 ```
 
 3、routel -4/-6：指定查询IPv4/IPv6路由  
 
 ```bash
-routel -6
-Dst                      Gateway                   Prefsrc  Protocol  Scope   Metric  Dev              Table
-------------------------------------------------------------------------------------------------------------
-240e:b8f:2578:2d00::/64  /                         /        ra        global  100     eth0             main
-fe80::/64                /                         /        kernel    global  256     tun0             main
-fe80::/64                /                         /        kernel    global  1024    eth0             main
-fe80::/64                /                         /        kernel    global  1024    lan              main
-default                  fe80::11ad:7cc9:26ef:5ce  /        ra        global  100     eth0             main
-local                    /                         /        kernel    global  0       lo               local
-local                    /                         /        kernel    global  0       eth0             local
-local                    /                         /        kernel    global  0       tun0             local
-local                    /                         /        kernel    global  0       eth0             local
-local                    /                         /        kernel    global  0       lan              local
-multicast                /                         /        kernel    global  256     eth0             local
-multicast                /                         /        kernel    global  256     eth1             local
-multicast                /                         /        kernel    global  256     lan              local
-multicast                /                         /        kernel    global  256     eth2             local
-multicast                /                         /        kernel    global  256     wlx0013ef6f25bd  local
-multicast                /                         /        kernel    global  256     tun0             local
+root@SoftRouting:~# routel -6
+-------------------------------------------------------------------------------------------------------------------------------
+|                                                       IPv6 Routes: 21                                                       |
+-------------------------------------------------------------------------------------------------------------------------------
+| Dst                                     Gateway                   Prefsrc  Protocol  Scope   Metric  Dev              Table |
+-------------------------------------------------------------------------------------------------------------------------------
+| 240e:b8f:xxxx:xxxx::/64                 /                         /        ra        global  114     eth0             main  |
+| ::/1                                    /                         /        kernel    global  1024    wg0              main  |
+| fd00:10:10:40::/96                      /                         /        kernel    global  256     wg0              main  |
+| fe80::/64                               /                         /        kernel    global  1024    eth0             main  |
+| fe80::/64                               /                         /        kernel    global  1024    lan              main  |
+| 8000::/1                                /                         /        kernel    global  1024    wg0              main  |
+| default                                 fe80::11ad:7cc9:26ef:5ce  /        ra        global  114     eth0             main  |
+| ::1                                     /                         /        kernel    host    0       lo               local |
+| 240e:b8f:xxxx:xxxx::                    /                         /        kernel    host    0       eth0             local |
+| 240e:b8f:xxxx:xxxx:xxxx:xxxx:fe02:1360  /                         /        kernel    host    0       eth0             local |
+| fd00:10:10:40::                         /                         /        kernel    host    0       wg0              local |
+| fd00:10:10:40::100                      /                         /        kernel    host    0       wg0              local |
+| fe80::                                  /                         /        kernel    host    0       eth0             local |
+| fe80::                                  /                         /        kernel    host    0       lan              local |
+| fe80::499a:3536:69c6:d2bf               /                         /        kernel    host    0       lan              local |
+| fe80::62be:b4ff:fe02:1360               /                         /        kernel    host    0       eth0             local |
+| ff00::/8                                /                         /        kernel    link    256     eth0             local |
+| ff00::/8                                /                         /        kernel    link    256     wg0              local |
+| ff00::/8                                /                         /        kernel    link    256     eth1             local |
+| ff00::/8                                /                         /        kernel    link    256     wlx0013ef6f25bd  local |
+| ff00::/8                                /                         /        kernel    link    256     lan              local |
+-------------------------------------------------------------------------------------------------------------------------------
 ```
 
 4、使用 `空格` 翻页，`Ctrl + c` 结束进程  
@@ -61,19 +75,26 @@ multicast                /                         /        kernel    global  25
 
 ```bash
 root@SoftRouting:~# routel -6 -t local
-Dst                                     Gateway  Prefsrc  Protocol  Scope  Metric  Dev              Table
----------------------------------------------------------------------------------------------------------
-::1                                     /        /        kernel    host   0       lo               local
-240e:b8f:2578:2d00:62be:b4ff:fe02:1360  /        /        kernel    host   0       eth0             local
-fe80::366c:2e0d:f39b:36eb               /        /        kernel    host   0       tun0             local
-fe80::62be:b4ff:fe02:1360               /        /        kernel    host   0       eth0             local
-fe80::af16:e3d1:f0a8:9752               /        /        kernel    host   0       lan              local
-ff00::/8                                /        /        kernel    link   256     eth0             local
-ff00::/8                                /        /        kernel    link   256     eth1             local
-ff00::/8                                /        /        kernel    link   256     lan              local
-ff00::/8                                /        /        kernel    link   256     eth2             local
-ff00::/8                                /        /        kernel    link   256     wlx0013ef6f25bd  local
-ff00::/8                                /        /        kernel    link   256     tun0             local
+-------------------------------------------------------------------------------------------------------------
+|                                              IPv6 Routes: 14                                              |
+-------------------------------------------------------------------------------------------------------------
+| Dst                                     Gateway  Prefsrc  Protocol  Scope  Metric  Dev              Table |
+-------------------------------------------------------------------------------------------------------------
+| ::1                                     /        /        kernel    host   0       lo               local |
+| 240e:b8f:xxxx:xxxx::                    /        /        kernel    host   0       eth0             local |
+| 240e:b8f:xxxx:xxxx:xxxx:xxxx:fe02:1360  /        /        kernel    host   0       eth0             local |
+| fd00:10:10:40::                         /        /        kernel    host   0       wg0              local |
+| fd00:10:10:40::100                      /        /        kernel    host   0       wg0              local |
+| fe80::                                  /        /        kernel    host   0       eth0             local |
+| fe80::                                  /        /        kernel    host   0       lan              local |
+| fe80::499a:3536:69c6:d2bf               /        /        kernel    host   0       lan              local |
+| fe80::62be:b4ff:fe02:1360               /        /        kernel    host   0       eth0             local |
+| ff00::/8                                /        /        kernel    link   256     eth0             local |
+| ff00::/8                                /        /        kernel    link   256     wg0              local |
+| ff00::/8                                /        /        kernel    link   256     eth1             local |
+| ff00::/8                                /        /        kernel    link   256     wlx0013ef6f25bd  local |
+| ff00::/8                                /        /        kernel    link   256     lan              local |
+-------------------------------------------------------------------------------------------------------------
 ```
 
 ## xfromshow
@@ -127,3 +148,20 @@ ovpn-show -c openvpn.log -s openvpn-status.log -i user
 ```bash
 status log/openvpn-status.log 10			# 每10秒刷新一次在线用户
 ```
+
+## 实时监控包转发速率和带宽
+
+将脚本packets-show放入/usr/bin/，然后使用chmod + x赋予可执行权限，使用packs-show命令运行，效果如下  
+
+<img width="1397" height="396" alt="image" src="https://github.com/user-attachments/assets/393bd525-396a-4c26-9c30-572b084fdf7f" />  
+
+- **IFACE**：接口名称（如 lo、eth0、lan）。
+- **rxpck/s**：每秒接收包数（Receive Packets per second）。
+- **txpck/s**：每秒发送包数（Transmit Packets per second）。
+- **rxMbps**：每秒接收带宽。
+- **txMbps**：每秒发送带宽。
+- **rxbcast/s**：每秒接收广播包数。
+- **txbcast/s**：每秒发送广播包数。
+- **rxmcst/s**：每秒接收组播包数（Receive Multicast packets per second，不包括广播）。
+- t**xmcst/s**：每秒发送组播包数（Receive Multicast packets per second，不包括广播）。
+
