@@ -8,7 +8,7 @@ Linux下存在iproute2包可以配置内核的ip，路由，接口等信息，�
 
 因此我更改了routel程序内容，增加了颜色分类和Metric显示，使用时直接把我存储库中的routel内容覆盖掉你`/usr/bin/routel`内容即可。效果如下：  
 
-<img width="1453" height="742" alt="image" src="https://github.com/user-attachments/assets/481cd39e-2f50-4bc3-8452-517dbaa067f1" />  
+<img width="859" height="575" alt="image" src="https://github.com/user-attachments/assets/dd616e56-a991-4178-936d-ccd5273c17f0" />  
 
 默认情况下，直接使用`routel`命令会显示所有的IPv4路由，默认情况下显200条路由，超出部分可使用 `空格` 下翻，`Ctrl + c` 结束（就如同网络设备一样，为了防止路由过多导致单次查询消耗太多的cpu）  
 
@@ -29,7 +29,7 @@ root@SoftRouting:~# routel -i 192.168.10.0/24
 ----------------------------------------------------------------------------------------------
 ```
 
-2、routel -p 500：指定打印单页的路由数（默认300条），使用-p all显示当前协议下的所有路由  
+2、routel -p 500：指定打印单页的路由数（默认200条），使用-p all显示当前协议下的所有路由  
 
 ```bash
 root@SoftRouting:~# routel -p 500
