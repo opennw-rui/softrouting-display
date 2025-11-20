@@ -169,3 +169,13 @@ status log/openvpn-status.log 10			# 每10秒刷新一次在线用户
 - **rxmcst/s**：每秒接收组播包数（Receive Multicast packets per second，不包括广播）。
 - t**xmcst/s**：每秒发送组播包数（Receive Multicast packets per second，不包括广播）。
 
+使用-i指定要监控的网卡
+
+```bash
+root@SoftRouting:~# packs_show -i eth1
+----------------------------------------------------------------------------------------------
+|Interface   | rxpck/s| txpck/s|  rxMbps|  txMbps| rxbcast/s| txbcast/s| rxmcast/s| txmcast/s|
+----------------------------------------------------------------------------------------------
+|eth1        |      14|      20|    0.01|    0.02|         0|         0|         0|         0|
+----------------------------------------------------------------------------------------------
+```
