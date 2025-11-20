@@ -4,17 +4,21 @@ from collections import defaultdict
 import sys
 import subprocess
 import re
+import argparse
 
-def get_net_stats():
-    stats = defaultdict(lambda: [0] * 16) # 16 fields per iface from /proc/net/dev
+def get_net_stats(iface=None):
+    stats = defaultdict(lambda: [0] * 16)  # 16 fields per iface from /proc/net/dev
     try:
         with open('/proc/net/dev', 'r') as f:
-            lines = f.readlines()[2:] # Skip header lines
+            lines = f.readlines()[2:]  # Skip header lines
             for line in lines:
                 parts = line.split()
-                iface = parts[0].rstrip(':')
-                values = [int(x) for x in parts[1:]]
-                stats[iface] = values
+                current_iface = parts[0].rstrip(':')
+                if iface is None or current_iface == iface:
+                    values = [int(x) for x in parts[1:]]
+                    stats[current_iface] = values
+                if iface is not None and current_iface == iface:
+                    break  # Early exit if single iface found
     except FileNotFoundError:
         # Fallback for non-Linux (rare)
         pass
@@ -40,7 +44,7 @@ def get_broadcast_and_multicast_stats(iface):
     except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, subprocess.SubprocessError):
         pass
     # Fallback only for rx_multicast to /proc/net/dev (index 7), tx_multicast no fallback
-    stats = get_net_stats()
+    stats = get_net_stats(iface)
     if iface in stats:
         rx_m = stats[iface][7]
     return rx_b, tx_b, rx_m, tx_m
@@ -96,35 +100,54 @@ def get_row(iface, rates, W):
     return line
 
 def main():
+    parser = argparse.ArgumentParser(description='Network interface monitor')
+    parser.add_argument('-i', '--interface', help='Specify network interface to monitor (default: all except lo)')
+    args = parser.parse_args()
+
+    # Initial stats to check existence and compute max W
+    initial_stats = get_net_stats(args.interface) if args.interface else get_net_stats()
+    if args.interface:
+        if args.interface not in initial_stats:
+            print(f"Interface not found: {args.interface}", file=sys.stderr)
+            sys.exit(1)
+        initial_ifaces = [args.interface]
+        W = max(12, len(args.interface))
+    else:
+        initial_ifaces = sorted(set(initial_stats.keys()) - {'lo'})
+        W = max(12, max((len(iface) for iface in initial_ifaces), default=0)) if initial_ifaces else 12
+
     # Hide cursor
-    print("\033[?25l", end='')
+    sys.stdout.write("\033[?25l")
     sys.stdout.flush()
-    # Initial stats to compute max W
-    initial_stats = get_net_stats()
-    initial_ifaces = sorted(set(initial_stats.keys()) - {'lo'})
-    W = max(12, max((len(iface) for iface in initial_ifaces), default=0))
+
     total_width = get_total_width(W)
     top_sep = get_separator(total_width)
     header_line = get_header(W)
     mid_sep = get_separator(total_width)
     bottom_sep = get_separator(total_width)
+
     # Print fixed header part
-    print(top_sep)
-    print(header_line)
-    print(mid_sep)
-    print(bottom_sep)
+    initial_lines = [top_sep, header_line, mid_sep, bottom_sep]
+    sys.stdout.write('\n'.join(initial_lines) + '\n')
     sys.stdout.flush()
-    prev_stats = get_net_stats()
+
+    prev_stats = initial_stats.copy()
     # Initialize prev_bcast_mcast with actual cumulative values to avoid initial spike
     prev_bcast_mcast = {iface: get_broadcast_and_multicast_stats(iface) for iface in initial_ifaces}
     start_time = time.time()
-    prev_num_lines = 4
+    prev_num_lines = len(initial_lines) + 1  # Account for the trailing newline
+
     try:
         while True:
-            current_stats = get_net_stats()
-            current_ifaces = sorted(set(current_stats.keys()) - {'lo'})
+            current_stats = get_net_stats(args.interface) if args.interface else get_net_stats()
+            if args.interface:
+                current_ifaces = [args.interface] if args.interface in current_stats else []
+                new_W = max(12, len(args.interface)) if current_ifaces else 12
+            else:
+                current_ifaces = sorted(set(current_stats.keys()) - {'lo'})
+                new_W = max(12, max((len(iface) for iface in current_ifaces), default=0)) if current_ifaces else 12
+
             # Update W if new longer iface
-            new_W = max(W, max((len(iface) for iface in current_ifaces), default=0))
             if new_W > W:
                 W = new_W
                 total_width = get_total_width(W)
@@ -132,10 +155,12 @@ def main():
                 header_line = get_header(W)
                 mid_sep = get_separator(total_width)
                 bottom_sep = get_separator(total_width)
+
             interval = time.time() - start_time
             if interval < 1.0:
                 time.sleep(0.1)
                 continue
+
             row_lines = []
             for iface in current_ifaces:
                 prev = prev_stats.get(iface, [0] * 16)
@@ -165,14 +190,14 @@ def main():
                 txmcast = round(delta_tx_m / interval) if interval > 0 else 0
                 rates = (rxpck, txpck, rxmbps, txmbps, rxbcast, txbcast, rxmcast, txmcast)
                 row_lines.append(get_row(iface, rates, W))
-                prev_bcast_mcast[iface] = curr_bcast_mcast # Update prev
+                prev_bcast_mcast[iface] = curr_bcast_mcast  # Update prev
+
             full_lines = [top_sep, header_line, mid_sep] + row_lines + [bottom_sep]
-            num_lines = len(full_lines)
+            num_lines = len(full_lines) + 1  # Account for the trailing newline
             # Move up previous lines and clear down
-            if prev_num_lines > 0:
-                print("\033[{}A\033[J".format(prev_num_lines), end='')
-            for line in full_lines:
-                print(line)
+            move_up_clear = "\033[{}A\033[J".format(prev_num_lines - 1) if prev_num_lines > 0 else ""  # Adjust for cursor position after trailing newline
+            output = '\n'.join(full_lines) + '\n'
+            sys.stdout.write(move_up_clear + output)
             sys.stdout.flush()
             prev_num_lines = num_lines
             start_time = time.time()
@@ -181,8 +206,8 @@ def main():
         pass
     finally:
         # Show cursor and move to new line
-        print("\033[?25h", end='')
-        print()
+        sys.stdout.write("\033[?25h\n")
+        sys.stdout.flush()
 
 if __name__ == "__main__":
     main()
