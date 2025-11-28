@@ -8,7 +8,7 @@ Linux下存在iproute2包可以配置内核的ip，路由，接口等信息，�
 
 因此我更改了routel程序内容，增加了颜色分类和Metric显示，使用时直接把我存储库中的routel内容覆盖掉你`/usr/bin/routel`内容即可。  
 
-原本的routel是python程序，在本项目刚创建时也使用python完成，但是发现在万级路由的情况下cpu消耗大和cpu运行时间长；随后使用C++重写程序并使用静态库，以确保在Linux上不受库的影响可直接使用。重写后的程序运行时的CPU消耗仅仅比ip route 命令查看时增加了部分，但是换来的却是美观整洁的界面和丰富的参数效果。在6000条路由显示时，time ip route show table all的real为0m0.023s，而重写后的routel使用time routel -p all的real为0m0.027s
+原本的routel是python程序，在本项目刚创建时也使用python完成，但是发现在万级路由的情况下cpu消耗大和cpu运行时间长；随后使用C++重写程序并使用静态库，以确保在Linux上不受库的影响可直接使用。重写后的程序运行时的CPU消耗仅仅比ip route 命令查看时增加了部分，但是换来的却是美观整洁的界面和丰富的参数效果。
 
 效果如下：  
 
