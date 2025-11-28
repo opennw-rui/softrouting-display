@@ -12,7 +12,7 @@ Linux下存在iproute2包可以配置内核的ip，路由，接口等信息，�
 
 效果如下：  
 
-<img width="958" height="583" alt="image" src="https://github.com/user-attachments/assets/0e9dc695-c8a6-4822-9492-c33fd877473a" />  
+<img width="1464" height="801" alt="image" src="https://github.com/user-attachments/assets/dc31c9c3-ba0f-4b52-8332-24167202928b" />  
 
 默认情况下，直接使用`routel`命令会显示所有的IPv4路由，默认情况下显200条路由，超出部分可使用 `空格` 下翻，`Ctrl + c` 结束（就如同网络设备一样，为了防止路由过多导致单次查询消耗太多的cpu）  
 
